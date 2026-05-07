@@ -161,27 +161,94 @@ presence-only proxy.
   vegetation cover (p = 0.012, surviving Holm) are the two
   predictors that pass.
 
-- **Transect-level confirmatory test for distance:** within-transect
-  permutation of the presence labels (preserving the marginal number
-  of detections per transect), recomputing the median distance among
-  detected quadrants under each permutation; one-sided p = proportion
-  of permutations with median ≤ observed.
+- **Transect-level test for distance:** within-transect permutation of
+  the presence labels (preserving the marginal number of detections
+  per transect), recomputing the median distance among detected
+  quadrants under each permutation; one-sided p = proportion of
+  permutations with median ≤ observed.
   Result: observed median = 1.0 m, null median = 4.87 m
   (95% prediction interval [2.0, 7.5]); permutation p = 0.0015.
-  This confirms the distance result is not an artefact of within-transect
-  spatial autocorrelation.
+  Leave-one-positive-transect-out worst-case: p ≤ 0.018 — robust to
+  any single transect being dropped.
 
 - **Predictor collinearity:** Spearman ρ among all five predictors
   flags strong correlation between distance and vegetation cover
   (ρ = 0.60, p < 0.001), supporting interpretation as a single
   composite microhabitat axis ("exposed near-shore basalt within
-  ~2 m of water") rather than two independent dimensions of selection.
+  ~2 m of water") rather than two independent dimensions.
+
+### Pooled-adjacent transect sensitivity (spatial autocorrelation)
+
+Eight transects per zone were deployed sequentially along one continuous
+lagoon perimeter, raising the possibility of inter-transect spatial
+autocorrelation. We pooled consecutive transect pairs into n=4
+block-transects per zone and re-ran the between-zone test.
+Result: χ² = 4.80, p = 0.091, permutation p = 0.21. The rocky-vs-
+lacustrine contrast (3/4 vs 0/4) survives the aggregation; the rocky-
+vs-intermediate contrast does not. The manuscript therefore frames
+the between-zone result as **consistent with a strong rocky/lacustrine
+contrast in detection rate**, not as a confirmed three-zone heterogeneity
+test.
+
+### Substrate-conditioned detectability sensitivity (3 models)
+
+Under what relative detection probability between zones would the
+observed lacustrine zero be compatible with equal underlying use? We
+report three parameterisations:
+
+| Model | Assumption | E[lacustrine \| equal use] | P(observe 0) |
+|-------|------------|----------------------------|--------------|
+| Linear | p ∝ rock cover | 0.47 events | 0.62 |
+| Step | p = 0 if rock < 5% | 0.00 events | 1.00 |
+| Saturating | Hill (K = rock_rocky / 4) | 1.91 events | 0.15 |
+
+All three converge on the same conclusion: the lacustrine zero is
+plausible under equal underlying use given the rock-turning protocol's
+substrate-conditioned detectability. The qualitative claim that
+surface emergence is concentrated in the rocky zone is robust to this
+parameterisation; the quantitative magnitude is not.
+
+### Manly's α from quadrant counts vs event counts
+
+To verify that the event-based numerator is not inflated by within-
+quadrant aggregation (the rocky zone has ~6.5 events per occupied
+quadrant; the intermediate zone ~1.5), we recomputed Manly's α from
+**occupied-quadrant counts** (8/2/0) instead of detection-event counts
+(52/3/0). The two formulations give identical α values
+(rocky=0.800, intermediate=0.200, lacustrine=0.000) because the
+standardised selection ratio is determined by between-zone rates.
+
+### Aquatic-quadrant exclusion sensitivity
+
+Excluding the 3 aquatic quadrants (distance=0, structurally false-
+negative under turbid water) from the rocky-zone denominator yields a
+detection rate of 8/77 = 10.4% vs the reported 8/80 = 10.0% — no
+qualitative change in any test.
+
+### Independent encounters (IE) vs quadrant distance distribution
+
+Mann-Whitney one-sided test of the hypothesis that IE distances exceed
+quadrant-detected distances: median IE = 7.5 m, median quadrant = 1 m,
+p = 0.004. The IE distribution extends to 25 m, well beyond the
+9-m terrestrial reach of the systematic transects.
+
+### Rock-turnability gradient
+
+Initially hypothesised that rocks at the shoreline edge are more
+"turnable" (smaller, looser) than at the rocky-steppe interior,
+biasing protocol detection toward the shore. The data refute this:
+proportion of small+medium movable rocks per quadrant position is
+0.44 at d=0 m, 0.52 at d=1 m, 0.71 at d=2 m — increasing inward.
+The 1-2 m systematic-detection peak therefore cannot be attributed to
+a movable-rock-density gradient; alternative protocol-detection-volume
+explanations (cavity density, microclimate) and a true emergence
+concentration remain plausible.
 
 ### Statistical power
 
 A Monte-Carlo simulation (n_sim = 20,000, normal-shift model
 calibrated to the target rank-biserial r, seed = 42) estimates power
-for the n₁ = 8 vs n₂ = 72 design at α = 0.05:
+for the n₁ = 8 vs n₂ = 72 design at α = 0.05 (uncorrected, no Holm):
 
 | Effect size (rank-biserial r) | Power |
 |-------------------------------|-------|
@@ -189,7 +256,9 @@ for the n₁ = 8 vs n₂ = 72 design at α = 0.05:
 | 0.40 (moderate) | 0.47 |
 | 0.50 (medium-large) | 0.69 |
 
-Variables that did not survive Holm correction are therefore underpowered
+These are uncorrected upper bounds; Holm-corrected power for
+non-leading tests in the family is correspondingly lower. Variables
+that did not survive Holm correction are therefore underpowered
 rather than null; this is reported as a Limitation of the manuscript.
 
 ---

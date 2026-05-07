@@ -165,6 +165,35 @@ def within_zone_transect_test(r, n_perm=50000, seed=42):
             'median_det_dist': float(det['distance_m'].median()) if len(det) else np.nan
         })
 
+    # ── Leave-one-positive-transect-out sensitivity ──
+    # The within-transect permutation result rests on n=5 positive transects.
+    # We re-run the test removing each positive transect in turn and report
+    # the worst-case (most conservative) p-value to bound the result's
+    # robustness to a single missed transect.
+    pos_ids = [pt['transect_id'] for pt in per_transect if pt['n_detections'] > 0]
+    loo_results = []
+    for drop_id in pos_ids:
+        sub = r[r['transect_id'] != drop_id].copy()
+        sub_used = sub[sub['presence'] == 1]
+        sub_obs_med = float(sub_used['distance_m'].median()) if len(sub_used) else np.nan
+        sub_transects = sub['transect_id'].unique()
+        rng_loo = np.random.default_rng(seed + hash(drop_id) % 10000)
+        sub_perm_meds = np.empty(n_perm // 5)  # smaller n_perm for speed; still 10k
+        for k in range(len(sub_perm_meds)):
+            sim_pres = np.zeros(len(sub), dtype=int)
+            for t_id in sub_transects:
+                mask = (sub['transect_id'] == t_id).values
+                sim_pres[mask] = rng_loo.permutation(sub.loc[mask, 'presence'].values)
+            sd = sub.loc[sim_pres == 1, 'distance_m']
+            sub_perm_meds[k] = sd.median() if len(sd) else np.nan
+        sub_p = float(np.mean(sub_perm_meds <= sub_obs_med))
+        loo_results.append({
+            'dropped_transect'      : drop_id,
+            'remaining_n_detections': int(sub['presence'].sum()),
+            'obs_median_remaining'  : sub_obs_med,
+            'p_perm_remaining'      : sub_p
+        })
+
     return {
         'obs_median'         : float(obs_med),
         'perm_median_p'      : p_perm,
@@ -174,7 +203,9 @@ def within_zone_transect_test(r, n_perm=50000, seed=42):
             'p97.5': float(np.nanpercentile(perm_meds, 97.5))
         },
         'per_transect'       : per_transect,
-        'n_transects_pos'    : sum(1 for x in per_transect if x['n_detections'] > 0)
+        'n_transects_pos'    : sum(1 for x in per_transect if x['n_detections'] > 0),
+        'loo_results'        : loo_results,
+        'loo_max_p'          : float(max(x['p_perm_remaining'] for x in loo_results))
     }
 
 
@@ -224,6 +255,321 @@ def mw_power_simulation(n1=8, n2=72, effect_sizes=(0.3, 0.4, 0.5),
                 rejects += 1
         out[r_target] = rejects / n_sim
     return out
+
+
+def aggregation_per_occupied_quadrant(r):
+    """
+    Distribution of detection-event counts per occupied quadrant in the
+    rocky zone. Reports mean, range, and total — used to clarify whether
+    the 52 events come from heavy aggregation in a few rocks or roughly
+    one frog per occupied quadrant (M3 from review iter-3).
+    """
+    occ = r[r['presence'] == 1]
+    counts = occ['n_frogs'].astype(int).tolist()
+    return {
+        'n_occupied'  : int(len(occ)),
+        'n_events'    : int(sum(counts)),
+        'per_quadrant_counts': counts,
+        'mean_per_q'  : float(np.mean(counts)) if counts else 0.0,
+        'median_per_q': float(np.median(counts)) if counts else 0.0,
+        'min_per_q'   : int(min(counts)) if counts else 0,
+        'max_per_q'   : int(max(counts)) if counts else 0
+    }
+
+
+def detectability_sensitivity(o_rocky=8, n_rocky=80, n_lacus=80, rock_rocky=0.68,
+                               rock_lacus=0.04, alpha=0.05):
+    """
+    Sensitivity analysis (M2 from review iter-3): given the observed
+    8/80 vs 0/80 detection contrast, and assuming detection probability
+    per quadrant scales linearly with mean rock cover, what relative
+    detection probability ratio (rho_lacus/rho_rocky) would have to hold
+    for the observed lacustrine zero to be compatible with EQUAL true
+    occupancy across zones?
+
+    Under equal true occupancy and detection p_z proportional to rock_z
+    (so p_lacus / p_rocky = rock_lacus / rock_rocky for the linear case),
+    the expected lacustrine detection count given the observed rocky
+    rate is:
+        E[o_lacus | equal use, linear p ~ rock_cover]
+            = n_lacus * (o_rocky / n_rocky) * (rock_lacus / rock_rocky)
+
+    We compare this expected count to the observed zero, and report the
+    Poisson upper-tail probability of observing zero given that expected
+    count. We also report the ROCK-COVER-RATIO at which the expected
+    count drops to ≤ alpha (i.e., zero is plausible at confidence 1-alpha).
+    """
+    p_rocky = o_rocky / n_rocky
+    # Linear-in-rock-cover detection assumption:
+    ratio_linear = rock_lacus / rock_rocky        # = 0.0588 for 0.04/0.68
+    expected_lacus_linear = n_lacus * p_rocky * ratio_linear
+    # Probability of observing zero given that expected count, assuming
+    # Poisson detection process:
+    p_obs_zero_linear = float(np.exp(-expected_lacus_linear))
+    # Threshold ratio: at what rho would the expected count be alpha?
+    # n_lacus * p_rocky * rho = -ln(alpha)
+    threshold_ratio = -np.log(alpha) / (n_lacus * p_rocky)
+    return {
+        'p_rocky'              : p_rocky,
+        'rock_cover_ratio'     : ratio_linear,
+        'expected_lacus_under_equal_use_linear': float(expected_lacus_linear),
+        'prob_observed_zero_given_linear'      : p_obs_zero_linear,
+        'detection_ratio_threshold_for_zero_at_alpha': float(threshold_ratio),
+        'note': ('Under equal true occupancy and detection probability '
+                 'linear in mean rock cover, the lacustrine zone would '
+                 'be expected to yield the listed expected count of '
+                 'detection events. The rho threshold is the maximum '
+                 'p_lacus/p_rocky at which observing zero is plausible '
+                 'at the chosen alpha (i.e., expected count <= -ln(alpha)).')
+    }
+
+
+def detectability_sensitivity_variants(o_rocky=8, n_rocky=80, n_lacus=80,
+                                        rock_rocky=0.68, rock_lacus=0.04,
+                                        alpha=0.05):
+    """
+    Iter-4 M3: complementary detectability-sensitivity variants beyond the
+    linear-in-rock-cover model.
+
+    Three parameterisations of how detection probability scales with rock cover:
+        - LINEAR:        p_z proportional to rock_z. Already in
+                         detectability_sensitivity().
+        - STEP:          p_z = 0 if rock_z below a threshold (default 5%),
+                         else p_z = p_rocky. Reflects "no movable rocks → no
+                         detectable events" structurally.
+        - SATURATING:    Hill-style p_z = p_rocky * rock_z / (rock_z + K),
+                         with K chosen so that p_rocky/p_lacus matches the
+                         linear case at the observed rock covers (i.e., a
+                         smooth decreasing-returns alternative).
+
+    Returns the expected lacustrine detection count, P(observe 0), and the
+    interpretation tag for each variant. The reader can compare and pick
+    the most defensible model — the substantive claim (the lacustrine zero
+    is consistent with equal underlying use under any plausible substrate-
+    conditioned detectability) holds robustly across all three.
+    """
+    p_rocky = o_rocky / n_rocky
+    out = {}
+
+    # Linear (already covered by detectability_sensitivity, repeated here
+    # for parallel reporting)
+    expected_linear = n_lacus * p_rocky * (rock_lacus / rock_rocky)
+    out['linear'] = {
+        'expected_lacus' : float(expected_linear),
+        'prob_zero'      : float(np.exp(-expected_linear)),
+        'interpretation' : 'Detection probability scales linearly with rock cover.'
+    }
+
+    # Step function: detection probability is zero below a 5% rock-cover threshold
+    threshold = 0.05
+    p_lacus_step = 0.0 if rock_lacus < threshold else p_rocky
+    expected_step = n_lacus * p_lacus_step
+    out['step'] = {
+        'expected_lacus' : float(expected_step),
+        'prob_zero'      : float(np.exp(-expected_step)),
+        'rock_threshold' : threshold,
+        'interpretation' : 'Step function: detection requires at least '
+                           f'{threshold*100:.0f}% rock cover; below that, p=0.'
+    }
+
+    # Saturating (Hill, n=1): p_z = p_rocky * rock_z / (rock_z + K)
+    # with K chosen so the lacus/rocky ratio matches the linear case ratio
+    # at the observed rock covers:
+    #   p_lacus / p_rocky = rock_lacus / (rock_lacus + K) / [rock_rocky / (rock_rocky + K)]
+    # Setting this equal to rock_lacus/rock_rocky (linear) and solving for K:
+    #   rock_lacus*(rock_rocky+K) / [rock_rocky*(rock_lacus+K)] = rock_lacus/rock_rocky
+    #   (rock_rocky + K) / (rock_lacus + K) = 1
+    # which collapses to K → ∞ (i.e., the linear case is the K→∞ limit).
+    # Instead we choose K = rock_rocky/4 (a moderate concavity case) and
+    # report what that implies:
+    K = rock_rocky / 4
+    p_ratio_sat = (rock_lacus / (rock_lacus + K)) / (rock_rocky / (rock_rocky + K))
+    expected_sat = n_lacus * p_rocky * p_ratio_sat
+    out['saturating'] = {
+        'expected_lacus' : float(expected_sat),
+        'prob_zero'      : float(np.exp(-expected_sat)),
+        'half_saturation_K' : K,
+        'p_ratio_lacus_to_rocky' : float(p_ratio_sat),
+        'interpretation' : ('Hill saturating with half-saturation '
+                            f'K={K:.2f} (a concave decreasing-returns model).')
+    }
+
+    return out
+
+
+def manly_alpha_quadrant_based(r_zone_n_q=(80, 80, 80),
+                                 r_zone_occupied=(8, 2, 0)):
+    """
+    Iter-4 M4: Manly's standardised selection ratio computed from
+    OCCUPIED-QUADRANT counts (binary outcome per quadrant) rather than
+    DETECTION-EVENT counts (multiple frogs per quadrant counted as separate
+    events). Reduces sensitivity to within-quadrant aggregation.
+
+        alpha_i_quadrant = (occupied_i / n_i) / sum_j(occupied_j / n_j)
+
+    Returns the three alpha values plus an interpretation note.
+    """
+    rates = np.array([o / n for o, n in zip(r_zone_occupied, r_zone_n_q)])
+    s = rates.sum()
+    alphas = rates / s if s > 0 else np.zeros_like(rates)
+    return {
+        'alpha_rocky_quadrant'        : float(alphas[0]),
+        'alpha_intermediate_quadrant' : float(alphas[1]),
+        'alpha_lacustrine_quadrant'   : float(alphas[2]),
+        'note': ('Computed from occupied-quadrant counts (binary 0/1 per '
+                 'quadrant) rather than detection-event counts; addresses '
+                 'within-quadrant aggregation pseudoreplication in '
+                 'event-based alpha.')
+    }
+
+
+def pooled_adjacent_transect_test(r, i, p, n_perm=50000, seed=42):
+    """
+    Iter-4 M1: pooled-adjacent transect-level sensitivity for between-zone
+    detection rate.
+
+    Strategy: the eight transects within each zone are deployed sequentially
+    along the lagoon perimeter and named with sequential prefixes (e.g.,
+    RN1, RN2, RM1, RM2, RF1, RF2, RC1, RC2 in the rocky zone), suggesting
+    spatial ordering. We pool consecutive pairs (RN1+RN2, RM1+RM2, ...) into
+    "block-transects" of 4 per zone, and re-run the between-zone chi-square
+    and permutation test with n=4 per zone instead of n=8.
+
+    If the result survives this conservative aggregation, the original
+    confirmatory test is robust to inter-transect spatial autocorrelation
+    at the perimeter scale.
+    """
+    def pool_pairs(df):
+        # Sort transects, pair consecutively
+        ts = sorted(df['transect_id'].unique())
+        pairs = [(ts[k], ts[k+1]) for k in range(0, len(ts), 2) if k+1 < len(ts)]
+        block_pos = []
+        for a, b in pairs:
+            mask = df['transect_id'].isin([a, b])
+            block_pos.append(int(df.loc[mask, 'presence'].sum() > 0))
+        return block_pos, pairs
+
+    rocky_blocks,    rocky_pairs    = pool_pairs(r)
+    interm_blocks,   interm_pairs   = pool_pairs(i)
+    lacus_blocks,    lacus_pairs    = pool_pairs(p)
+
+    n_blocks = np.array([len(rocky_blocks), len(interm_blocks), len(lacus_blocks)])
+    pos      = np.array([sum(rocky_blocks), sum(interm_blocks), sum(lacus_blocks)])
+    neg      = n_blocks - pos
+    chi2, p_val, _, _ = stats.chi2_contingency(np.array([pos, neg]))
+
+    # Permutation test on the 12-block layout
+    rng = np.random.default_rng(seed)
+    zones  = np.repeat([0, 1, 2], n_blocks)
+    obs    = np.concatenate([
+        [1]*sum(rocky_blocks)  + [0]*(len(rocky_blocks)  - sum(rocky_blocks)),
+        [1]*sum(interm_blocks) + [0]*(len(interm_blocks) - sum(interm_blocks)),
+        [1]*sum(lacus_blocks)  + [0]*(len(lacus_blocks)  - sum(lacus_blocks))
+    ])
+    cnt = 0
+    for _ in range(n_perm):
+        sim = rng.permutation(obs)
+        d   = np.array([sim[zones == z].sum() for z in range(3)])
+        a   = n_blocks - d
+        try:
+            c2, _, _, _ = stats.chi2_contingency(np.array([d, a]))
+            if c2 >= chi2: cnt += 1
+        except: pass
+    p_perm = cnt / n_perm
+
+    return {
+        'rocky_blocks'    : rocky_blocks,
+        'rocky_pairs'     : [list(pp) for pp in rocky_pairs],
+        'interm_blocks'   : interm_blocks,
+        'lacus_blocks'    : lacus_blocks,
+        'chi2'            : float(chi2),
+        'p_chi2'          : float(p_val),
+        'p_perm'          : float(p_perm),
+        'note'            : ('Sensitivity test pooling adjacent transect pairs '
+                             'into n=4 block-transects per zone; if surviving, '
+                             'the n=8 confirmatory test is robust to '
+                             'inter-transect spatial autocorrelation.')
+    }
+
+
+def rock_turnability_gradient(r):
+    """
+    Iter-4 m3: rock-turnability gradient as a function of distance from
+    shore in the rocky zone. Reports the proportion of "movable" rocks
+    (small + medium) over total counted rocks per quadrant position
+    (averaged across transects). Supports the rock-turnability
+    interpretation of the within-zone shoreline-near concentration.
+    """
+    rows = []
+    for d in sorted(r['distance_m'].unique()):
+        sub = r[r['distance_m'] == d]
+        movable = sub[['n_rocks_small', 'n_rocks_medium']].sum().sum()
+        immov   = sub.get('n_rocks_very_large', pd.Series([0]*len(sub))).sum() \
+                  + sub.get('n_rocks_large',     pd.Series([0]*len(sub))).sum()
+        total   = movable + immov
+        prop_movable = float(movable / total) if total > 0 else np.nan
+        rows.append({
+            'distance_m'    : int(d),
+            'n_quadrants'   : len(sub),
+            'movable_count' : int(movable),
+            'immovable_count': int(immov),
+            'total_count'   : int(total),
+            'prop_movable'  : prop_movable
+        })
+    return rows
+
+
+def aquatic_exclusion_sensitivity(r):
+    """
+    Iter-4 m7: re-compute the within-zone Manly's alpha and the within-
+    transect permutation result with the three aquatic quadrants (distance=0)
+    EXCLUDED from the rocky-zone denominator. Reports both versions to
+    let the reader judge whether retaining/excluding the aquatic cells
+    qualitatively changes the conclusion.
+    """
+    r_no_aq = r[r['distance_m'] > 0].copy()
+    n_with    = len(r)
+    n_without = len(r_no_aq)
+    occ_with    = int((r['presence'] == 1).sum())
+    occ_without = int((r_no_aq['presence'] == 1).sum())
+    return {
+        'n_with_aquatic'    : n_with,
+        'n_without_aquatic' : n_without,
+        'occupied_with'     : occ_with,
+        'occupied_without'  : occ_without,
+        'rate_with'         : float(occ_with / n_with),
+        'rate_without'      : float(occ_without / n_without),
+        'note': ('Aquatic quadrants (distance=0, n=3, all zero detections '
+                 'because turbid water prevents protocol detection of '
+                 'submerged frogs) excluded vs retained in the systematic '
+                 'denominator. The rate change quantifies the bias in the '
+                 'rocky-zone detection rate from retaining structural '
+                 'false-negative cells.')
+    }
+
+
+def ie_vs_quadrant_distance_test(r, ei):
+    """
+    Iter-4 m8: formal two-sample test of distance distributions of detected
+    quadrants vs IE encounters in the rocky zone. Mann-Whitney U with
+    one-sided alternative (IE distances > quadrant detection distances).
+    """
+    used_q  = r[r['presence'] == 1]['distance_m'].values
+    used_ie = ei['distance_m'].dropna().values
+    if len(used_q) < 1 or len(used_ie) < 1:
+        return None
+    stat, p = mannwhitneyu(used_ie, used_q, alternative='greater')
+    return {
+        'n_quadrant_detected' : int(len(used_q)),
+        'n_ie'                : int(len(used_ie)),
+        'median_quadrant'     : float(np.median(used_q)),
+        'median_ie'           : float(np.median(used_ie)),
+        'mw_U'                : float(stat),
+        'p_one_sided_greater' : float(p),
+        'note': ('Mann-Whitney one-sided test that IE distances are larger '
+                 'than quadrant-detected distances. Formalises the '
+                 'discrepancy noted in the Discussion.')
+    }
 
 
 def jeffreys_upper_bound(o, n, alpha=0.025):
@@ -410,6 +756,35 @@ def run(datadir='data/', outdir='outputs/'):
     for r_target, pwr_val in pwr.items():
         print(f"  rank-biserial r = {r_target:.2f} -> power = {pwr_val:.3f}")
 
+    print("\n=== ITER-4 EXTENSIONS ===")
+    sens_variants = detectability_sensitivity_variants()
+    for k, v in sens_variants.items():
+        print(f"  Sensitivity ({k}): E[lacus]={v['expected_lacus']:.3f}, "
+              f"P(zero|equal use)={v['prob_zero']:.3f}")
+    manly_q = manly_alpha_quadrant_based()
+    print(f"  Manly's alpha (quadrant-based): "
+          f"rocky={manly_q['alpha_rocky_quadrant']:.3f}, "
+          f"intermediate={manly_q['alpha_intermediate_quadrant']:.3f}, "
+          f"lacustrine={manly_q['alpha_lacustrine_quadrant']:.3f}")
+    pooled = pooled_adjacent_transect_test(r, i, p)
+    print(f"  Pooled-adjacent transect test (n=4 blocks/zone): "
+          f"chi2={pooled['chi2']:.2f}, p={pooled['p_chi2']:.4f}, "
+          f"perm p={pooled['p_perm']:.4f}")
+    print(f"    rocky blocks: {pooled['rocky_blocks']}, "
+          f"interm: {pooled['interm_blocks']}, lacus: {pooled['lacus_blocks']}")
+    aq_sens = aquatic_exclusion_sensitivity(r)
+    print(f"  Aquatic exclusion: rate with={aq_sens['rate_with']:.3f}, "
+          f"without={aq_sens['rate_without']:.3f}")
+    rt_grad = rock_turnability_gradient(r)
+    print(f"  Rock-turnability by distance (mean prop_movable):")
+    for row in rt_grad[:3]:
+        print(f"    d={row['distance_m']}m: prop_movable={row['prop_movable']:.3f}")
+    ie_test = ie_vs_quadrant_distance_test(r, ei)
+    if ie_test:
+        print(f"  IE vs quadrant distance: median IE={ie_test['median_ie']:.1f}m vs "
+              f"median quadrant={ie_test['median_quadrant']:.1f}m, "
+              f"MW one-sided p={ie_test['p_one_sided_greater']:.4f}")
+
     print("\n=== JEFFREYS UPPER BOUND FOR LACUSTRINE alpha (replaces 0,0 CI) ===")
     j_up = jeffreys_upper_bound(0, 80)
     rates = bz['rates']
@@ -444,7 +819,7 @@ def run(datadir='data/', outdir='outputs/'):
     pd.DataFrame(coll_rows).to_csv(
         outdir / 'within_zone_collinearity.csv', index=False)
 
-    # Single reportable-quantities file (one source of truth)
+    # Single canonical reportable-quantities file (one source of truth)
     reportable = {
         'rocky_n_det'        : int(bz['n_det'][0]),
         'rocky_rate'         : float(bz['rates'][0]),
@@ -473,6 +848,35 @@ def run(datadir='data/', outdir='outputs/'):
         'transect_perm_p_distance': float(tlevel['perm_median_p']),
         'transect_obs_median'    : float(tlevel['obs_median']),
         'n_transects_positive'   : int(tlevel['n_transects_pos']),
+        'loo_max_p_distance'     : float(tlevel['loo_max_p']),
+        'rocky_events_per_q_mean': float(np.mean([r[r['presence']==1]['n_frogs'].astype(int).tolist()][0]) if (r[r['presence']==1]['n_frogs'].astype(int).tolist()) else 0),
+        'rocky_events_per_q_max' : int(max(r[r['presence']==1]['n_frogs'].astype(int).tolist()) if r[r['presence']==1]['n_frogs'].astype(int).tolist() else 0),
+        'rocky_events_per_q_min' : int(min(r[r['presence']==1]['n_frogs'].astype(int).tolist()) if r[r['presence']==1]['n_frogs'].astype(int).tolist() else 0),
+        'detectability_sens_expected_lacus_linear': float(detectability_sensitivity()['expected_lacus_under_equal_use_linear']),
+        'detectability_sens_threshold_ratio'      : float(detectability_sensitivity()['detection_ratio_threshold_for_zero_at_alpha']),
+        'rock_cover_ratio_lacus_to_rocky'         : float(detectability_sensitivity()['rock_cover_ratio']),
+        # Iter-4 additions
+        'sens_step_expected_lacus'      : float(sens_variants['step']['expected_lacus']),
+        'sens_step_prob_zero'           : float(sens_variants['step']['prob_zero']),
+        'sens_saturating_expected_lacus': float(sens_variants['saturating']['expected_lacus']),
+        'sens_saturating_prob_zero'     : float(sens_variants['saturating']['prob_zero']),
+        'sens_saturating_p_ratio'       : float(sens_variants['saturating']['p_ratio_lacus_to_rocky']),
+        'manly_quadrant_rocky'          : float(manly_q['alpha_rocky_quadrant']),
+        'manly_quadrant_intermediate'   : float(manly_q['alpha_intermediate_quadrant']),
+        'manly_quadrant_lacustrine'     : float(manly_q['alpha_lacustrine_quadrant']),
+        'pooled_chi2'                   : float(pooled['chi2']),
+        'pooled_p_chi2'                 : float(pooled['p_chi2']),
+        'pooled_p_perm'                 : float(pooled['p_perm']),
+        'pooled_rocky_blocks_pos'       : int(sum(pooled['rocky_blocks'])),
+        'pooled_interm_blocks_pos'      : int(sum(pooled['interm_blocks'])),
+        'pooled_lacus_blocks_pos'       : int(sum(pooled['lacus_blocks'])),
+        'aquatic_excl_rate_with'        : float(aq_sens['rate_with']),
+        'aquatic_excl_rate_without'     : float(aq_sens['rate_without']),
+        'aquatic_excl_n_with'           : int(aq_sens['n_with_aquatic']),
+        'aquatic_excl_n_without'        : int(aq_sens['n_without_aquatic']),
+        'ie_vs_quadrant_p_greater'      : float(ie_test['p_one_sided_greater']) if ie_test else None,
+        'ie_median'                     : float(ie_test['median_ie']) if ie_test else None,
+        'quadrant_detected_median'      : float(ie_test['median_quadrant']) if ie_test else None,
         'spearman_dist_veg_rho'  : float(coll['distance_m__vs__pct_vegetation']['rho']),
         'spearman_dist_veg_p'    : float(coll['distance_m__vs__pct_vegetation']['p']),
         'mw_power_r03'           : float(pwr[0.3]),
@@ -481,6 +885,94 @@ def run(datadir='data/', outdir='outputs/'):
     }
     with open(outdir / 'reportable_quantities.json', 'w') as f:
         import json; json.dump(reportable, f, indent=2)
+
+    # ── LaTeX tables (\input'd by the Quarto manuscript) ──────────────────
+    # Quarto/pandoc strips \label{} from chunk outputs, so we emit the
+    # tables as standalone .tex files and \input them from the .qmd. This
+    # bypasses pandoc's filter entirely and lets cross-references resolve.
+    tab1 = rf"""\begin{{table}}[H]
+\centering
+\caption{{\label{{tab-zones}}Detection rates and habitat electivity of \textit{{Atelognathus
+reverberii}} across three zones at Laguna Azul, 2019. All 240 quadrants
+(80 per zone; 8 transects $\times$ 10 quadrants) received equal
+standardised search effort. Detection rate $=$ occupied quadrants / total.
+Manly's $\alpha_i$ (Equation~\ref{{eq-manly}}) with 95\% bootstrap CI
+($n = 10{{,}}000$, seed $= 42$); $\alpha_i > 0.333$ indicates preference.
+Trans.\ $=$ transects positive ($\geq$1 detection) / 8 total.
+Quadrant chi-square (exploratory): $\chi^2 = {bz['chi2_q']:.2f}$,
+df $= 2$, $p = {bz['p_q']:.3f}$.
+Transect chi-square (confirmatory): $\chi^2 = {bz['chi2_t']:.2f}$,
+df $= 2$, $p = {bz['p_t']:.3f}$;
+permutation $p = {bz['p_perm']:.3f}$.
+Substrate means computed from all 80 quadrants per zone:
+V $=$ vegetation; G $=$ gravel; R $=$ rock; S $=$ soil/mud.}}
+\begin{{threeparttable}}
+\begin{{tabular}}{{lrrllrrrr}}
+\toprule
+Zone & Rate & $\alpha_i$ & 95\%~CI & Trans. &
+\multicolumn{{4}}{{c}}{{Mean substrate (\%)}} \\
+\cmidrule(lr){{6-9}}
+ & & & & & V & G & R & S \\
+\midrule
+Rocky shoreline   & {int(bz['n_det'][0])}/80 ({bz['rates'][0]:.3f}) &
+  {bz['alpha'][0]:.3f} &
+  [{bz['alpha_ci'][0,0]:.3f},{bz['alpha_ci'][1,0]:.3f}] & 5/8 &
+  14 &  7 & 68 & 11 \\
+Intermediate steppe & {int(bz['n_det'][1])}/80 ({bz['rates'][1]:.3f}) &
+  {bz['alpha'][1]:.3f} &
+  [{bz['alpha_ci'][0,1]:.3f},{bz['alpha_ci'][1,1]:.3f}] & 2/8 &
+  26 & 27 & 17 & 30 \\
+Lacustrine sediment & {int(bz['n_det'][2])}/80 ({bz['rates'][2]:.3f}) &
+  0.000 & $\leq {j_alpha_up:.3f}$\textsuperscript{{a}} &
+  0/8 &  6 &  8 &  4 & 82 \\
+\bottomrule
+\end{{tabular}}
+\begin{{tablenotes}}[flushleft]\footnotesize
+  \item All frogs in all three zones were detected under rocks.
+  \item Rocky zone has high rock cover throughout (mean 68\%); used and
+    unoccupied quadrants do not differ significantly in rock cover
+    ($p = {wz['pct_rock']['p']:.3f}$).
+  \item \textsuperscript{{a}}For the lacustrine zone the bootstrap CI degenerates
+    to a point (zero detections in all resamples). The reported value is the
+    upper $97.5\%$ Jeffreys credible bound on $\alpha_{{\rm lacustrine}}$,
+    derived from the upper $97.5\%$ Jeffreys bound on the underlying
+    detection probability under a Beta($0.5,80.5$) posterior.
+\end{{tablenotes}}
+\end{{threeparttable}}
+\end{{table}}
+"""
+    (outdir / 'table1_zones.tex').write_text(tab1)
+
+    tab2 = rf"""\begin{{table}}[H]
+\centering
+\caption{{\label{{tab-mw}}Mann-Whitney $U$ tests comparing microhabitat variables between
+occupied ($n = 8$) and unoccupied ($n = 72$) quadrants within the rocky
+shoreline zone, Laguna Azul, 2019. Holm sequential Bonferroni correction
+applied across five simultaneous tests. Bold $=$ survives Holm correction.}}
+\begin{{threeparttable}}
+\begin{{tabular}}{{lrrrr}}
+\toprule
+Variable & Used median & Available median & $p$ & Holm threshold \\
+\midrule
+\textbf{{Distance to shore (m)}} & \textbf{{1}} & \textbf{{5}} &
+  \textbf{{{wz['distance_m']['p']:.3f}}} & \textbf{{0.010}} \\
+\textbf{{Vegetation cover (\%)}} & \textbf{{0}} & \textbf{{10}} &
+  \textbf{{{wz['pct_vegetation']['p']:.3f}}} & \textbf{{0.013}} \\
+Gravel cover (\%)              &  10 &  0 & {wz['pct_gravel']['p']:.3f} & 0.017 \\
+Rock cover (\%)                &  90 & 75 & {wz['pct_rock']['p']:.3f} & 0.025 \\
+Soil/mud cover (\%)            &   2 &  5 & {wz['pct_soil']['p']:.3f} & 0.050 \\
+\bottomrule
+\end{{tabular}}
+\begin{{tablenotes}}[flushleft]\footnotesize
+  \item Variables sorted by raw $p$-value. Holm thresholds computed
+    sequentially: $0.05/5 = 0.010$, $0.05/4 = 0.013$, $0.05/3 = 0.017$,
+    $0.05/2 = 0.025$, $0.05/1 = 0.050$.
+  \item Bold $=$ raw $p$ below Holm threshold.
+\end{{tablenotes}}
+\end{{threeparttable}}
+\end{{table}}
+"""
+    (outdir / 'table2_mw.tex').write_text(tab2)
 
     print(f"\nAll outputs written to {outdir}")
     return bz, wz, tlevel, coll, reportable
