@@ -531,6 +531,33 @@ def rock_turnability_gradient(r):
     return rows
 
 
+def within_zone_mw_no_aquatic(r):
+    """
+    Iter-8 m2: re-run within-zone Mann-Whitney for distance with the
+    three aquatic quadrants (distance=0, structural false-negatives)
+    excluded from the rocky-zone denominator. Reports the MW p with and
+    without the aquatic quadrants for the distance-to-shore variable
+    (the load-bearing within-zone test).
+    """
+    used_full   = r[r['presence'] == 1]['distance_m']
+    avail_full  = r[r['presence'] == 0]['distance_m']
+    _, p_full = mannwhitneyu(used_full, avail_full, alternative='two-sided')
+    r_no_aq     = r[r['distance_m'] > 0]
+    used_noaq   = r_no_aq[r_no_aq['presence'] == 1]['distance_m']
+    avail_noaq  = r_no_aq[r_no_aq['presence'] == 0]['distance_m']
+    _, p_noaq = mannwhitneyu(used_noaq, avail_noaq, alternative='two-sided')
+    return {
+        'p_with_aquatic'    : float(p_full),
+        'p_without_aquatic' : float(p_noaq),
+        'n_avail_with'      : int(len(avail_full)),
+        'n_avail_without'   : int(len(avail_noaq)),
+        'note': ('Two-sided Mann-Whitney for distance-to-shore between '
+                 'occupied and unoccupied rocky-zone quadrants, computed '
+                 'with and without the three aquatic quadrants '
+                 '(distance=0, structural false-negatives).')
+    }
+
+
 def aquatic_exclusion_sensitivity(r):
     """
     Iter-4 m7: re-compute the within-zone Manly's alpha and the within-
@@ -797,6 +824,12 @@ def run(datadir='data/', outdir='outputs/'):
               f"median quadrant={ie_test['median_quadrant']:.1f}m, "
               f"MW one-sided p={ie_test['p_one_sided_greater']:.4f}")
 
+    print("\n=== ITER-8 EXTENSIONS ===")
+    mw_aq = within_zone_mw_no_aquatic(r)
+    print(f"  Within-zone MW for distance:")
+    print(f"    p with aquatic    = {mw_aq['p_with_aquatic']:.4f} (n_avail={mw_aq['n_avail_with']})")
+    print(f"    p without aquatic = {mw_aq['p_without_aquatic']:.4f} (n_avail={mw_aq['n_avail_without']})")
+
     print("\n=== JEFFREYS UPPER BOUND FOR LACUSTRINE alpha (replaces 0,0 CI) ===")
     j_up = jeffreys_upper_bound(0, 80)
     rates = bz['rates']
@@ -889,6 +922,9 @@ def run(datadir='data/', outdir='outputs/'):
         'ie_vs_quadrant_p_greater'      : float(ie_test['p_one_sided_greater']) if ie_test else None,
         'ie_median'                     : float(ie_test['median_ie']) if ie_test else None,
         'quadrant_detected_median'      : float(ie_test['median_quadrant']) if ie_test else None,
+        # Iter-8: within-zone MW with vs without aquatic quadrants (m2)
+        'mw_distance_p_with_aquatic'    : float(mw_aq['p_with_aquatic']),
+        'mw_distance_p_without_aquatic' : float(mw_aq['p_without_aquatic']),
         'spearman_dist_veg_rho'  : float(coll['distance_m__vs__pct_vegetation']['rho']),
         'spearman_dist_veg_p'    : float(coll['distance_m__vs__pct_vegetation']['p']),
         'mw_power_r03'           : float(pwr[0.3]),
