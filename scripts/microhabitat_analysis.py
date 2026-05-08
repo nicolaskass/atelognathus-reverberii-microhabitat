@@ -494,27 +494,39 @@ def pooled_adjacent_transect_test(r, i, p, n_perm=50000, seed=42):
 
 def rock_turnability_gradient(r):
     """
-    Iter-4 m3: rock-turnability gradient as a function of distance from
-    shore in the rocky zone. Reports the proportion of "movable" rocks
-    (small + medium) over total counted rocks per quadrant position
-    (averaged across transects). Supports the rock-turnability
-    interpretation of the within-zone shoreline-near concentration.
+    Iter-4 m3 + iter-7 M5: rock-turnability and cavity-density gradient
+    by distance from shore in the rocky zone.
+
+    Reports per quadrant position:
+      - prop_movable: proportion of "movable" rocks (small+medium) over
+        total counted rocks (cavity-availability proxy)
+      - mean_movable_per_quadrant: mean number of movable rocks per
+        quadrant (cavity-density proxy — the actual number of shelter
+        sites the protocol could turn at each distance)
+
+    Together these bound the within-zone detection-volume confound:
+    if the systematic 1-m peak coincides with a higher number of
+    available movable shelters, the peak is at least partly a
+    cavity-density artefact rather than a true emergence concentration.
     """
     rows = []
     for d in sorted(r['distance_m'].unique()):
         sub = r[r['distance_m'] == d]
-        movable = sub[['n_rocks_small', 'n_rocks_medium']].sum().sum()
-        immov   = sub.get('n_rocks_very_large', pd.Series([0]*len(sub))).sum() \
-                  + sub.get('n_rocks_large',     pd.Series([0]*len(sub))).sum()
-        total   = movable + immov
-        prop_movable = float(movable / total) if total > 0 else np.nan
+        movable_total = sub[['n_rocks_small', 'n_rocks_medium']].sum().sum()
+        immov_total   = sub.get('n_rocks_very_large', pd.Series([0]*len(sub))).sum() \
+                        + sub.get('n_rocks_large',     pd.Series([0]*len(sub))).sum()
+        total = movable_total + immov_total
+        prop_movable = float(movable_total / total) if total > 0 else np.nan
+        n_q = len(sub)
+        mean_movable_per_q = float(movable_total / n_q) if n_q > 0 else np.nan
         rows.append({
-            'distance_m'    : int(d),
-            'n_quadrants'   : len(sub),
-            'movable_count' : int(movable),
-            'immovable_count': int(immov),
-            'total_count'   : int(total),
-            'prop_movable'  : prop_movable
+            'distance_m'             : int(d),
+            'n_quadrants'            : n_q,
+            'movable_count'          : int(movable_total),
+            'immovable_count'        : int(immov_total),
+            'total_count'            : int(total),
+            'prop_movable'           : prop_movable,
+            'mean_movable_per_quadrant': mean_movable_per_q
         })
     return rows
 
