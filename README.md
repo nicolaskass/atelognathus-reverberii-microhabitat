@@ -232,17 +232,30 @@ quadrant-detected distances: median IE = 7.5 m, median quadrant = 1 m,
 p = 0.004. The IE distribution extends to 25 m, well beyond the
 9-m terrestrial reach of the systematic transects.
 
-### Rock-turnability gradient
+### Rock-turnability gradient and cavity-density dissociation
 
 Initially hypothesised that rocks at the shoreline edge are more
 "turnable" (smaller, looser) than at the rocky-steppe interior,
-biasing protocol detection toward the shore. The data refute this:
-proportion of small+medium movable rocks per quadrant position is
-0.44 at d=0 m, 0.52 at d=1 m, 0.71 at d=2 m — increasing inward.
-The 1-2 m systematic-detection peak therefore cannot be attributed to
-a movable-rock-density gradient; alternative protocol-detection-volume
-explanations (cavity density, microclimate) and a true emergence
-concentration remain plausible.
+biasing protocol detection toward the shore. The data refute this on
+both proportion and absolute count: the proportion of small+medium
+movable rocks per quadrant position is 0.44 at d=0 m, 0.52 at d=1 m,
+0.71 at d=2 m (increasing inward), and the **absolute number of
+movable rocks per quadrant** is 5.8 at d=1 m versus 12.5 at d=3 m and
+12.6 at d=5 m. The systematic 1-m detection peak therefore cannot be
+attributed to either a movable-rock-fraction gradient or a movable-
+rock-count gradient — at the distances where 5 of 8 detections occur,
+there are fewer turnable shelters available than at distances where
+zero detections occurred. This positively rules out the simplest
+cavity-density artefact.
+
+### Within-zone Mann-Whitney with vs. without aquatic quadrants
+
+The 3 aquatic quadrants (distance = 0, positioned 1 m into the lagoon)
+are structural false-negatives (protocol cannot detect submerged frogs
+through turbid water). Re-running the within-zone MW for distance with
+those 3 excluded yields **p = 0.001** versus the reported p = 0.002
+with them retained. Inclusion of the aquatic quadrants is therefore
+conservative; the contrast strengthens when they are excluded.
 
 ### Statistical power
 
