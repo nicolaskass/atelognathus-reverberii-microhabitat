@@ -985,6 +985,10 @@ Lacustrine sediment & {int(bz['n_det'][2])}/80 ({bz['rates'][2]:.3f}) &
     upper $97.5\%$ Jeffreys credible bound on $\alpha_{{\rm lacustrine}}$,
     derived from the upper $97.5\%$ Jeffreys bound on the underlying
     detection probability under a Beta($0.5,80.5$) posterior.
+  \item Bootstrap CIs touching the parameter-space boundaries
+    ($\alpha_{{\rm rocky}}$ upper at $1.000$; $\alpha_{{\rm intermediate}}$
+    lower at $0.000$) should be read as ``near the parameter limit'' rather
+    than as precise endpoints (see \textit{{Limitations}}).
 \end{{tablenotes}}
 \end{{threeparttable}}
 \end{{table}}
@@ -1016,6 +1020,12 @@ Soil/mud cover (\%)            &   2 &  5 & {wz['pct_soil']['p']:.3f} & 0.050 \\
     sequentially: $0.05/5 = 0.010$, $0.05/4 = 0.013$, $0.05/3 = 0.017$,
     $0.05/2 = 0.025$, $0.05/1 = 0.050$.
   \item Bold $=$ raw $p$ below Holm threshold.
+  \item Unoccupied quadrants ($n = 72$) include three aquatic quadrants
+    (distance $= 0$~m, positioned 1~m into the lagoon), which are
+    structural false negatives because the protocol cannot detect
+    submerged frogs through turbid water. Re-running the distance-to-shore
+    test with those three quadrants excluded yields $p = 0.001$ (see Results,
+    \textit{{Robustness of the within-zone permutation}}).
 \end{{tablenotes}}
 \end{{threeparttable}}
 \end{{table}}
