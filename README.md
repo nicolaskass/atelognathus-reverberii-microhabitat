@@ -200,7 +200,7 @@ report three parameterisations:
 |-------|------------|----------------------------|--------------|
 | Linear | p ∝ rock cover | 0.47 events | 0.62 |
 | Step | p = 0 if rock < 5% | 0.00 events | 1.00 |
-| Saturating | Hill (K = rock_rocky / 4) | 1.91 events | 0.15 |
+| Saturating | Hill (K = rock_rocky / 4) | 1.90 events | 0.15 |
 
 All three converge on the same conclusion: the lacustrine zero is
 plausible under equal underlying use given the rock-turning protocol's
